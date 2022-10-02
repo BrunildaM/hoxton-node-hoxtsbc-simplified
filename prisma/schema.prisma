@@ -10,22 +10,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
-  id          Int           @id @default(autoincrement())
-  email       String        @unique
-  password    String
-  transactions Transaction[]
+  id                  Int           @id @default(autoincrement())
+  email               String        @unique
+  password            String
+  recievedTransaction Transaction[] @relation("recipient")
+  sentTransactions    Transaction[] @relation("sender")
 }
-
 
 //feature to add:  2 main types of bank transactions "Deposit" or "Withdraw" funds 
 
 model Transaction {
-  id       Int    @id @default(autoincrement())
-  ammount  Int
-  currency String
-  date     String
-  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId Int
+  id          Int      @id @default(autoincrement())
+  ammount     Int
+  currency    String
+  date        DateTime @default(now())
+  recipient   User     @relation("recipient", fields: [recipientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  recipientId Int    
+  sender      User     @relation("sender", fields: [senderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  senderId    Int      
 }

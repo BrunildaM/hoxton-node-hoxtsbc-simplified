@@ -1,58 +1,162 @@
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
-import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv'
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-dotenv.config()
+dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const port = 5000;
 
+const SECRET = process.env.SECRET!;
 
-const SECRET= process.env.SECRET!
+function hash(password: string) {
+  return bcrypt.hashSync(password, 6);
+}
 
+function verify(password: string, hash: string) {
+  return bcrypt.compareSync(password, hash);
+}
 
-// function getToken (id: number) {
-//   return jwt.sign({ id: id }, SECRET, {
-//     expiresIn: '5 minutes'
-//   })
-// }
+function generateToken(id: number) {
+  return jwt.sign({ id }, SECRET);
+}
+
+async function getCurrentUser(token: string) {
+  try {
+    const data = jwt.verify(token, SECRET);
+    const user = await prisma.user.findUnique({
+      where: { id: (data as any).id },
+      include: { transactions: true},
+    });
+    return user;
+  } catch (error) {
+    //@ts-ignore
+    return null;
+  }
+}
 
 // Getting transactions together with the user
 app.get("/users", async (req, res) => {
-  const users = await prisma.user.findMany()
+  const users = await prisma.user.findMany();
   res.send(users);
 });
 
 
+app.get("/transactions", async (req, res) => {
+  try {
+    const token = req.headers.authorization;
+    const user = await getCurrentUser(token);
 
-//when should a signup fail needs to be added
-app.post("/sign-up", async (req, res) => {
-  const user = await prisma.user.create({
-    data: {
-      email: req.body.email,
-      password: bcrypt.hashSync(req.body.password),
-    },
-  });
-  res.send(user);
+    if (user) {
+      res.send(user.transactions);
+    } else {
+      res.status(401).send({ errors: ["Invalid token provided!"] });
+    }
+  } catch (error) {
+    //@ts-ignore
+    res.status(400).send({ errors: [error.message] });
+  }
 });
 
+app.post("/transactions", async (req, res) => {
+
+});
+
+//Don't create two different accounts with the same email
+app.post("/sign-up", async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+
+    const errors: string[] = [];
+
+    if (typeof email !== "string") {
+      errors.push("Email not provided or not a string");
+    }
+
+    if (typeof password !== "string") {
+      errors.push("Password not provided or not a string");
+    }
+
+    if (errors.length > 0) {
+      res.status(400).send({ errors });
+      return;
+    }
+
+    if (existingUser) {
+      return res.status(400).send({ errors: ["Email already exist!"] });
+    }
+    const user = await prisma.user.create({
+      data: { email, password: hash(password) },
+    });
+    const token = generateToken(user.id);
+    res.send({ user, token });
+  } catch (error) {
+    //@ts-ignore
+    res.status(400).send({ errors: [error.message] });
+  }
+});
 
 app.post("/sign-in", async (req, res) => {
-  const user = await prisma.user.findUnique({
-    where: { email: req.body.email },
-  });
-  if (user && bcrypt.compareSync(req.body.password, user.password)) {
-    res.send({ message: "Welcome to your account" });
-  } else {
-    res
-      .status(400)
-      .send({ error: "Please make sure you are using the right credentials!" });
+  try {
+    const email = req.body.email;
+    const password = req.body.password;
+
+    const errors: string[] = [];
+
+    if (typeof email !== "string") {
+      errors.push("Email not provided or not a string");
+    }
+
+    if (typeof password !== "string") {
+      errors.push("Password not provided or not a string");
+    }
+
+    if (errors.length > 0) {
+      res.status(400).send({ errors });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+    if (user && verify(password, user.password)) {
+      const token = generateToken(user.id);
+      res.send({ user, token });
+    } else {
+      res.status(400).send({
+        errors: ["Please make sure you are using the right credentials!"],
+      });
+    }
+  } catch (error) {
+    //@ts-ignore
+    res.status(400).send({ errors: [error.message] });
+  }
+});
+
+app.get("/validate", async (req, res) => {
+  try {
+    const token = req.headers.authorization;
+    if (token) {
+      const user = await getCurrentUser(token);
+      if (user) {
+        const newToken = generateToken(user.id);
+        res.send({ user, token: newToken });
+      } else {
+        res.status(400).send({ errors: ["Token is invalid!"] });
+      }
+    } else {
+      res.status(400).send({ errors: ["Token not provided!"] });
+    }
+  } catch (error) {
+    //@ts-ignore
+    res.status(400).send({ errors: [error.message] });
   }
 });
 
