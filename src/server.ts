@@ -27,12 +27,15 @@ function generateToken(id: number) {
   return jwt.sign({ id }, SECRET);
 }
 
-async function getCurrentUser(token: string) {
+async function getCurrentUser(token = '') {
   try {
     const data = jwt.verify(token, SECRET);
     const user = await prisma.user.findUnique({
       where: { id: (data as any).id },
-      include: { transactions: true},
+      include: {
+        recievedTransaction: { include: { sender: true } },
+        sentTransactions: { include: { recipient: true } },
+      },
     });
     return user;
   } catch (error) {
@@ -47,24 +50,104 @@ app.get("/users", async (req, res) => {
   res.send(users);
 });
 
-
 app.get("/transactions", async (req, res) => {
   try {
     const token = req.headers.authorization;
-    const user = await getCurrentUser(token);
 
-    if (user) {
-      res.send(user.transactions);
-    } else {
-      res.status(401).send({ errors: ["Invalid token provided!"] });
+    if (!token) {
+      res.status(401).send({ errors: ["No token provided."] });
+      return;
     }
+
+    const user = await getCurrentUser(token);
+    if (!user) {
+      res.status(401).send({ errors: ["Invalid token provided."] });
+      return;
+    }
+
+    res.send({
+      sentTransactions: user.sentTransactions,
+      receivedTransactions: user.recievedTransaction,
+    });
   } catch (error) {
-    //@ts-ignore
+    // @ts-ignore
     res.status(400).send({ errors: [error.message] });
   }
 });
 
 app.post("/transactions", async (req, res) => {
+  const token = req.headers.authorization
+
+  if(!token) {
+    res.status(401).send({ errors: ["No token provided!"]})
+    return
+  }
+
+  const user = await getCurrentUser(token)
+
+  if(!user) {
+    res.status(401).send({ errors: ["Invalid token provided!"] })
+    return
+  }
+
+ 
+  const data = {
+    ammount: req.body.ammount,
+    recipientId: req.body.recipientId,
+    senderId: user.id
+  }
+
+  const errors: string[] = []
+
+  if(typeof data.ammount !== "number") {
+    errors.push("Ammount is missing or not a number!")
+  }
+
+  if(data.ammount < 1) {
+    errors.push("You can't send less than 1$!")
+  }
+
+  if(data.recipientId === data.senderId) {
+    errors.push("You can't send money to your own account!")
+  }
+
+  if(typeof data.recipientId !== "number") {
+    errors.push("Recipient id is missing or not a number!")
+  }
+
+  if (data.ammount > user.balance) {
+    errors.push("You don't have enough money for this transaction.")
+  }
+
+  const recipient = await prisma.user.findUnique({
+    where: { id: data.recipientId }
+  })
+  if (!recipient) {
+    errors.push('Recipient does not exist.')
+  }
+
+  if (errors.length > 0) {
+    res.status(400).send({ errors })
+    return
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { balance: user.balance - data.amount }
+  })
+
+  await prisma.user.update({
+    where: { id: data.recipientId },
+    data: { balance: recipient!.balance + data.amount }
+  })
+
+  const transaction = await prisma.transaction.create({
+    data,
+    include: { recipient: { select: { id: true, email: true } } }
+  })
+
+  res.send(transaction)
+
 
 });
 

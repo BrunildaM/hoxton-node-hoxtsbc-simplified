@@ -14,6 +14,7 @@ model User {
   id                  Int           @id @default(autoincrement())
   email               String        @unique
   password            String
+  balance Int @default(2000)
   recievedTransaction Transaction[] @relation("recipient")
   sentTransactions    Transaction[] @relation("sender")
 }
