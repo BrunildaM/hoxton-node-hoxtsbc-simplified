@@ -133,12 +133,12 @@ app.post("/transactions", async (req, res) => {
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { balance: user.balance - data.amount }
+    data: { balance: user.balance - data.ammount }
   })
 
   await prisma.user.update({
     where: { id: data.recipientId },
-    data: { balance: recipient!.balance + data.amount }
+    data: { balance: recipient!.balance + data.ammount }
   })
 
   const transaction = await prisma.transaction.create({
